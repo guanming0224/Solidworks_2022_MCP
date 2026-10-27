@@ -1,0 +1,738 @@
+{
+  "next_id": 44,
+  "rules": [
+    {
+      "id": "r0001",
+      "title": "API booleans return +1 in .swb - never use bitwise 'If Not'",
+      "applies_to": [
+        "vba",
+        "inline",
+        "selection"
+      ],
+      "error_signature": "could not select|selectstdplane|if not",
+      "symptom": "A selection/boolean helper clearly returns True, yet the 'If Not x' guard takes the failure branch.",
+      "cause": "In an on-the-fly .swb macro, SolidWorks API VARIANT_BOOL returns arrive as +1 (not VBA's True == -1). VBA 'Not' is bitwise, so 'Not 1' = -2 (truthy) and the guard misfires.",
+      "fix": "Test API booleans with 'If x = False Then' (never 'If Not x'). Object checks ('Is Nothing') are unaffected.",
+      "example_bad": "If Not okSel Then ... End If",
+      "example_good": "If okSel = False Then ... End If",
+      "created": "2026-06-20",
+      "hits": 1
+    },
+    {
+      "id": "r0002",
+      "title": "Create*Rectangle returns a Variant array - do not use Set",
+      "applies_to": [
+        "vba",
+        "inline",
+        "sketch"
+      ],
+      "error_signature": "object required|424|createcenterrectangle|createcornerrectangle",
+      "symptom": "Run-time error 424 'Object required' on Set seg = swSketchMgr.Create...Rectangle(...).",
+      "cause": "CreateCenterRectangle/CreateCornerRectangle return a Variant ARRAY of sketch segments, not a single object; Set on a non-object raises 424.",
+      "fix": "Capture as Variant and check IsArray: Dim v As Variant: v = swSketchMgr.CreateCenterRectangle(...): If IsArray(v) = False Then ... . (CreateCircleByRadius returns a single SketchSegment, so Set is fine there.)",
+      "example_bad": "Set swSeg = swSketchMgr.CreateCenterRectangle(0,0,0,a,b,0)",
+      "example_good": "Dim v As Variant\nv = swSketchMgr.CreateCenterRectangle(0,0,0,a,b,0)\nIf IsArray(v) = False Then buildFailed = True",
+      "created": "2026-06-20",
+      "hits": 1
+    },
+    {
+      "id": "r0003",
+      "title": "MsgBox blocks automation - use the silent log instead",
+      "applies_to": [
+        "vba",
+        "inline",
+        "automation"
+      ],
+      "error_signature": "timed out|modal|msgbox",
+      "symptom": "A macro call hangs / times out.",
+      "cause": "A modal MsgBox (or SendMsgToUser) blocks RunMacro2 until dismissed, deadlocking the COM thread.",
+      "fix": "In automated macros replace MsgBox with SWMCP_Log step/status/message lines; the server reads the log for per-step status. A dialog watchdog also auto-dismisses strays.",
+      "example_bad": "MsgBox \"Base failed\", vbCritical",
+      "example_good": "SWMCP_Log \"base\", \"ERROR\", \"Base extrusion failed\"",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0004",
+      "title": "Never hardcode template paths; abort if none configured",
+      "applies_to": [
+        "vba",
+        "document"
+      ],
+      "error_signature": "no default part template|newdocument returned nothing|could not create",
+      "symptom": "NewDocument returns Nothing / part is not created.",
+      "cause": "No default template is configured, or a hardcoded template path does not exist on this machine.",
+      "fix": "Get the template via GetUserPreferenceStringValue(swDefaultTemplatePart=8) and abort cleanly (SWMCP_Log ERROR) if it is empty.",
+      "example_bad": "Set m = swApp.NewDocument(\"C:\\templates\\part.prtdot\",0,0,0)",
+      "example_good": "tpl = swApp.GetUserPreferenceStringValue(8)\nIf tpl = \"\" Then SWMCP_Log \"init\",\"ERROR\",\"no template\": Exit Sub",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0005",
+      "title": "Select reference planes by tree position, not by name",
+      "applies_to": [
+        "vba",
+        "selection",
+        "plane"
+      ],
+      "error_signature": "select plane|top plane|front plane|right plane|selectbyid2.*plane",
+      "symptom": "SelectByID2(\"Top Plane\",\"PLANE\",...) returns False even though the name matches on screen.",
+      "cause": "Name-based plane selection is unreliable across templates / languages.",
+      "fix": "Use the SelectStdPlane helper (walks the tree, selects the Nth RefPlane feature directly): 1=Front, 2=Top, 3=Right.",
+      "example_bad": "swModelExt.SelectByID2 \"Top Plane\",\"PLANE\",0,0,0,False,0,Nothing,0",
+      "example_good": "okSel = SelectStdPlane(2, False, 0)  ' Top",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0006",
+      "title": "InsertRib silently no-ops from API; use a thin-boss gusset",
+      "applies_to": [
+        "vba",
+        "rib",
+        "feature"
+      ],
+      "error_signature": "insertrib|rib feature not created|no rib",
+      "symptom": "swFeatMgr.InsertRib runs without error but no Rib feature appears in the tree.",
+      "cause": "InsertRib is unreliable on programmatically-built sketches and on solids without bounding walls.",
+      "fix": "Build the gusset as a closed triangle bridging the two inner faces, extruded thin (mid-plane) - geometrically equivalent and reliable. A rib also needs walls to bridge; it cannot form above a flat block.",
+      "example_bad": "",
+      "example_good": "3x CreateLine closed triangle on Right plane + FeatureExtrusion3 thin both-dir",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0007",
+      "title": "Right (YZ) plane sketch coordinate mapping",
+      "applies_to": [
+        "vba",
+        "sketch",
+        "plane"
+      ],
+      "error_signature": "right plane|createline.*nothing|wrong place|yz plane",
+      "symptom": "CreateLine/CreateCircle on the Right plane lands in the wrong place or returns Nothing.",
+      "cause": "Sketch primitives use the sketch-plane LOCAL 2D coords (3rd arg must be 0), not model XYZ.",
+      "fix": "On the Right plane, local (u,v) maps to model (Z=-u, Y=v). On Top plane local=(X,Z); on Front plane local=(X,Y); 3rd CreateLine arg is always 0.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0008",
+      "title": "No log at all + ran=False means a VBA compile error",
+      "applies_to": [
+        "vba",
+        "inline",
+        "compile"
+      ],
+      "error_signature": "ran=false|compile|not defined|no log",
+      "symptom": "sw_run_and_verify returns ran=False with an empty log (not even the init step).",
+      "cause": "Under Option Explicit, a referenced Sub/Function/variable that is not defined is a COMPILE error, so main() never executes and nothing is logged.",
+      "fix": "Ensure every helper the macro calls (RenameFeature, FindLastSketchName, FindLastRefPlaneName, FindFeatureByName, etc.) is defined in the macro. Check for typos in identifiers and enum names.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0009",
+      "title": "Use bare enum member names, not qualified container names",
+      "applies_to": [
+        "vba",
+        "enum",
+        "compile"
+      ],
+      "error_signature": "swwzd|enum|_e\\.|ran=false",
+      "symptom": "Macro fails to compile (ran=False, no log) on a line referencing an enum like swWzdHoleTypes_e.swWzdCounterBore.",
+      "cause": "The guessed enum container type name (swWzdHoleTypes_e etc.) may be wrong; a wrong identifier is a compile error under Option Explicit.",
+      "fix": "Use the bare enum member name (swWzdCounterBore, swStandardAnsiMetric, swEndCondThroughAll) - SolidWorks enum members are globally accessible in VBA. Verify the exact name via sw_docs_lookup_enum if unsure.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0010",
+      "title": "AddComponent5 needs the loaded doc exact path (use partDoc.GetPathName)",
+      "applies_to": [
+        "vba",
+        "assembly",
+        "mate"
+      ],
+      "error_signature": "addcomponent|component insertion failed|addcomponent5",
+      "symptom": "AddComponent5 and AddComponent4 both return Nothing even though the part is loaded (GetType=1) and the assembly is active (GetType=2).",
+      "cause": "The path passed to AddComponent5 must match the in-memory document path exactly; a path that differs in slashes/case from the loaded doc fails silently.",
+      "fix": "After OpenDoc6, capture loadedPath = partDoc.GetPathName and pass THAT to AddComponent5/AddComponent4. Also use native backslash paths for SaveAs/OpenDoc6. Preload the part (OpenDoc6 Silent) and ActivateDoc3 the assembly (by StripExt(GetTitle)) before inserting.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0011",
+      "title": "GetErrorCode2 requires the ByRef IsWarning arg (else detection silently fails)",
+      "applies_to": [
+        "vba",
+        "diagnostics",
+        "assembly",
+        "mate"
+      ],
+      "error_signature": "geterrorcode2|over-defined|mate.*error|false success",
+      "symptom": "sw_run_and_verify reports success on a model that visibly has errored features (e.g. over-defined mates with a red X).",
+      "cause": "IFeature.GetErrorCode2(ByRef IsWarning) needs the IsWarning argument; calling it with no args always throws, so a try/except wrapper silently returns 0 and every feature looks clean.",
+      "fix": "Call GetErrorCode2 with a VT_BYREF VT_BOOL VARIANT and also DESCEND into sub-features (GetFirstSubFeature/GetNextSubFeature) - mates live as sub-features of the MateGroup. A non-zero code with IsWarning False is a real error (51 = over-defined).",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-20",
+      "hits": 2
+    },
+    {
+      "id": "r0012",
+      "title": "Do not mate the auto-fixed first assembly component",
+      "applies_to": [
+        "vba",
+        "assembly",
+        "mate"
+      ],
+      "error_signature": "over-defined|coincident.*error|fixed component|code 51",
+      "symptom": "Assembly has an over-defined mate (red X, code 51) right after insertion.",
+      "cause": "The first component added to an assembly is FIXED at the origin; mating its planes to the assembly planes adds redundant constraints and over-defines it.",
+      "fix": "Leave the first component fixed (no mates). Fully constrain each SUBSEQUENT component relative to the first (or to the assembly) - e.g. stack c2 on c1 with Front+Right coincident and Top distance = part thickness.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-20",
+      "hits": 2
+    },
+    {
+      "id": "r0013",
+      "title": "Mate component planes by instance name string; ignore AddMate5 ByRef error",
+      "applies_to": [
+        "vba",
+        "assembly",
+        "mate"
+      ],
+      "error_signature": "addmate5|incorrectselections|err=1|mate.*selection",
+      "symptom": "AddMate5 returns err=1 (IncorrectSelections) OR returns err=1 even though the mate is created correctly.",
+      "cause": "Selecting a component plane via comp.FirstFeature is ambiguous with duplicate part instances; and AddMate5 ByRef ErrorStatus is unreliable in an inline .swb (returns 1 even on valid mates).",
+      "fix": "Select the component-instance plane by name: \"<Plane>@<ComponentName>@<AssemblyTitle>\" with mark 1. Judge mate success by (swMate Is Not Nothing) + the post-rebuild GetErrorCode2 scan, NOT by the AddMate5 ByRef error code.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0014",
+      "title": "Surface modeling workflow: build surfaces -> trim -> knit -> thicken to solid",
+      "applies_to": [
+        "vba",
+        "surface",
+        "technique"
+      ],
+      "error_signature": "surface|offset surface|trim surface|knit|thicken|split line",
+      "symptom": "Need a complex organic/thin-wall shape (bottle, manifold) that pure solid features cannot make cleanly.",
+      "cause": "Professional surface workflow builds reference surfaces then converts to a solid.",
+      "fix": "Typical pro pipeline (from the Plastic Bottle tutorial): revolve/extrude a base surface; OffsetSurface for wall offset; SplitLine to divide a face; surface Extrude (mid-plane); Trim surface (keep/remove selections); Knit the surfaces; Thicken or Knit-with-create-solid to get a solid; then fillet/shell. Reuse model edges with Convert Entities.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0015",
+      "title": "Dimension diameters with a centerline (revolve profiles)",
+      "applies_to": [
+        "vba",
+        "sketch",
+        "revolve",
+        "technique"
+      ],
+      "error_signature": "diameter|revolve|centerline",
+      "symptom": "Revolve profiles need diameter dimensions, not radius.",
+      "cause": "Pros sketch a centerline on the axis; dimensioning across it and dragging past gives the full DIAMETER automatically.",
+      "fix": "Draw a centerline through the origin on the axis of revolution; when dimensioning a point to the centerline, drag the dimension to the far side to get the diameter value (2x radius). Always include the centerline in the revolve sketch.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0016",
+      "title": "Fully define sketches (esp. splines) before building features",
+      "applies_to": [
+        "vba",
+        "sketch",
+        "technique"
+      ],
+      "error_signature": "under.?defined|spline|fully define|drift",
+      "symptom": "Geometry drifts or rebuilds unpredictably; spline-based surfaces are unstable.",
+      "cause": "Under-defined sketches (blue entities) move; pros fully define every sketch (black).",
+      "fix": "Add construction lines + dimensions + relations (tangency, coincident-on-edge, horizontal/vertical, equal) until the sketch is fully defined. For splines: constrain endpoints to edges, set tangency/elevation, and dimension control points via construction lines.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0017",
+      "title": "GD&T basics: tolerance features, not just dimensions",
+      "applies_to": [
+        "design",
+        "tolerance",
+        "gdnt",
+        "reference"
+      ],
+      "error_signature": "gd&t|tolerance|datum|flatness|true position",
+      "symptom": "Need professional tolerancing intent for parts that must fit/function.",
+      "cause": "Dimensional tolerances do not capture functional intent (flatness of a sealing face, perpendicularity of a hole axis).",
+      "fix": "GD&T applies tolerances to FEATURES via feature control frames across 5 categories: Form (flatness, straightness, circularity, cylindricity), Orientation, Location, Profile, Runout. Reference datums (letter + triangle) for orientation/location. Use form tolerances on mating/sealing surfaces and position on holes.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0018",
+      "title": "Surface methods are Subs/Boolean on IModelDoc2 - call as statements",
+      "applies_to": [
+        "vba",
+        "surface"
+      ],
+      "error_signature": "refsurface|insertplanar|thicken|featureextru|surface.*424|surface.*450",
+      "symptom": "Set swFeat = swModel.FeatureExtruRefSurface2(...) or InsertPlanarRefSurface() fails (err 424/450), or surface call compile-errors.",
+      "cause": "Many surface methods live on IModelDoc2 (swModel), NOT FeatureManager, and are Subs (void) or return Boolean - so they cannot be assigned with Set.",
+      "fix": "Call them as statements (no Set): swModel.FeatureExtruRefSurface2 <args>; for InsertPlanarRefSurface use If swModel.InsertPlanarRefSurface()=False. Then get the new feature via FindLastFeature(). Surface creation on swModel: InsertPlanarRefSurface, InsertRevolvedRefSurface, InsertSweepRefSurface2, InsertLoftRefSurface2, InsertSewRefSurface, FeatureExtruRefSurface2, FeatureBossThicken (surface->solid).",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0019",
+      "title": "Verify arg COUNT from the VB declaration, not the Parameters list",
+      "applies_to": [
+        "vba",
+        "docs",
+        "compile"
+      ],
+      "error_signature": "wrong number of arguments|compile|ran=false|arg count",
+      "symptom": "An early-bound API call compile-errors (ran=False, no log) even though arg names look right.",
+      "cause": "The docs Parameters section can list more items than the real method takes (e.g. FeatureExtruRefSurface2 lists 20 but takes 17; FeatureBossThicken lists 4 but takes 3). Wrong arg count on an early-bound call is a COMPILE error.",
+      "fix": "Count args from the actual VB Sub/Function declaration line (render the doc page and count the parameter anchors), not the prose Parameters list. Use swSheetBody (not swSurfaceBody) for surface bodies in GetBodies2.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0020",
+      "title": "Sheet metal base flange: mirror the official example args",
+      "applies_to": [
+        "vba",
+        "sheetmetal"
+      ],
+      "error_signature": "baseflange|sheetmetal|insertsheetmetal",
+      "symptom": "InsertSheetMetalBaseFlange2 returns Nothing / creates no feature.",
+      "cause": "Wrong arg values (esp. DirToUse=0, UseDefaultRelief=True with zero relief).",
+      "fix": "Use the proven example args: InsertSheetMetalBaseFlange2(Thk, False, Rad, ExtrudeDist1, ExtrudeDist2, False, 0, 0, DirToUse=1, PCBA, UseDefaultRelief=False, ReliefType=2, 0.0001, 0.0001, 0.5, True, Merge=False, UseFeatScope=True, True). PCBA = an uninitialised Dim ... As Object (= Nothing). CLOSED profile -> flat plate (ExtrudeDist ignored); OPEN profile (e.g. an L of 2 lines) -> bent part, ExtrudeDist1 = depth, bend added at each vertex.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0021",
+      "title": "Edge flange needs a profile sketch; prefer open-profile base flange for simple bends",
+      "applies_to": [
+        "vba",
+        "sheetmetal"
+      ],
+      "error_signature": "edgeflange|edge flange",
+      "symptom": "InsertSheetMetalEdgeFlange2 returns Nothing even with a valid edge selected.",
+      "cause": "Edge flange expects a flange profile sketch (the official example builds one with InsertSketchForEdgeFlange); passing Nothing/empty sketch arrays returns Nothing.",
+      "fix": "For a simple bent part, use an OPEN-profile base flange (one feature, no edge selection). For a true edge flange, first create the profile sketch on the edge face via InsertSketchForEdgeFlange, then pass it in the SketchFeats array.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0022",
+      "title": "Close documents between operations - accumulated open docs degrade SolidWorks",
+      "applies_to": [
+        "vba",
+        "automation",
+        "testing"
+      ],
+      "error_signature": "intermittent|accumulated|stale|could not select.*plane",
+      "symptom": "Generators that pass in isolation fail intermittently when many run in sequence (plane/edge selection or feature creation fails).",
+      "cause": "Each new part/assembly stays open; dozens of open documents make SolidWorks sluggish and selection/state unreliable.",
+      "fix": "Close documents between independent operations (app.CloseAllDocuments True). In the test suite an autouse fixture closes all docs after each test.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-20",
+      "hits": 0
+    },
+    {
+      "id": "r0023",
+      "title": "Plane-mate alignment must be consistent across a component's 3 mates",
+      "applies_to": [
+        "assembly",
+        "mate",
+        "alignment",
+        "AddMate5"
+      ],
+      "error_signature": "over-defined / conflicting",
+      "symptom": "A subsequent component constrained by 3 orthogonal plane mates reports MateDistanceDim / MateCoincident error_code 51 (over-defined / conflicting) on the plane(s) where alignment was flipped.",
+      "cause": "Mixing swMateAlignALIGNED (0) and swMateAlignANTI_ALIGNED (1) inconsistently across a component's three orthogonal plane mates creates a conflicting rotation constraint. Using ANTI on one plane merely to push a component to the opposite side (instead of a signed distance) fights the other two ALIGNED mates.",
+      "fix": "Decide whether the component needs to ROTATE. If it needs NO rotation (same orientation as assembly), use ALIGNED (0) on all three plane mates and place opposite-side components with a NEGATIVE distance offset (flip = offset<0), never anti-align. If it needs a 180-deg rotation about an axis, flip alignment to ANTI (1) on exactly the two planes whose normals reverse under that rotation and keep ALIGNED on the third (e.g. 180 about Z: Right ANTI + Top ANTI + Front ALIGNED). Keep all three mates internally consistent.",
+      "example_bad": "",
+      "example_good": "' Screw mirrored to -X (no rotation): all ALIGNED, negative offset\nPlaneMate cS2, 3, -SCREW_R, 0\n' Arm rotated 180 about Z to point -X: Top ANTI, Front ALIGNED, Right ANTI\nPlaneMate cArm2, 2, 0, 1\nPlaneMate cArm2, 1, COLLAR_MID, 0\nPlaneMate cArm2, 3, COLLAR_R, 1",
+      "created": "2026-06-21",
+      "hits": 0
+    },
+    {
+      "id": "r0024",
+      "title": "Tubular runs: route a 3D sketch, fillet the corners, then sweep",
+      "applies_to": [
+        "design",
+        "sweep",
+        "manifold",
+        "3dsketch"
+      ],
+      "error_signature": "sweep|3d sketch|manifold|pipe|tube path|swept boss",
+      "symptom": "A pipe/manifold/cable run cannot be made from a single 2D sketch and a sweep fails or looks crude.",
+      "cause": "3D routing (out of the flange, then down to the collector) cannot be captured by one planar sketch.",
+      "fix": "Open a 3D Sketch, draw the route pressing Tab to switch the active X/Y/Z plane, fillet the 3D corners (e.g. R60/R80) into a smooth path, then Sweep a circular profile along it. Build rigid flanges first as solids. See sw_get_design_guidance(\"exhaust manifold\").",
+      "example_bad": "",
+      "example_good": "' 3D sketch path + R60/R80 corner fillets, sweep \u00d870 profile",
+      "created": "2026-06-21",
+      "hits": 0
+    },
+    {
+      "id": "r0025",
+      "title": "Hollow multi-body parts: Combine (Add) then a single Shell",
+      "applies_to": [
+        "design",
+        "shell",
+        "combine",
+        "multibody"
+      ],
+      "error_signature": "shell failed|combine|hollow|uniform wall|multibody",
+      "symptom": "Shelling a part made of several bodies (pipes + flanges) gives non-uniform walls or fails.",
+      "cause": "Shell needs one body; separate bodies shell independently.",
+      "fix": "Insert > Features > Combine (Add) all bodies into one solid, THEN Shell removing the open faces - one feature gives a uniform wall (the manifold shells 1 mm removing its 5 flange faces). See sw_get_design_guidance(\"manifold\").",
+      "example_bad": "",
+      "example_good": "' Combine Add all bodies; Shell 0.001 remove flange faces",
+      "created": "2026-06-21",
+      "hits": 0
+    },
+    {
+      "id": "r0026",
+      "title": "Layered/stacked parts: extrude base-first, grow with From Surface / Selected Contours",
+      "applies_to": [
+        "design",
+        "extrude",
+        "stacked",
+        "contour"
+      ],
+      "error_signature": "selected contour|from surface|stacked|layer|start condition",
+      "symptom": "A part with several thickness layers ends up as one dull block, or depths break when a dimension changes.",
+      "cause": "Typed absolute depths and a single closed profile cannot express a layered, datum-driven stack.",
+      "fix": "Draw concentric loops in ONE sketch and extrude different Selected Contours to different depths; use Start=From Surface so a layer grows off the previous face (rebuild-robust). See sw_get_design_guidance(\"mounting base plate\").",
+      "example_bad": "",
+      "example_good": "' Extrude inner contour, Start = From Surface (net stack height)",
+      "created": "2026-06-21",
+      "hits": 0
+    },
+    {
+      "id": "r0027",
+      "title": "Bolt circles: seed one hole on a construction PCD, then circular-pattern",
+      "applies_to": [
+        "design",
+        "pattern",
+        "hole",
+        "bolt circle"
+      ],
+      "error_signature": "bolt circle|pcd|pitch circle|hole pattern|circular pattern",
+      "symptom": "Multiple bolt holes drawn one-by-one are misplaced or hard to edit.",
+      "cause": "Hand-placing N holes is error-prone and not parametric.",
+      "fix": "Draw a construction PCD circle + a centerline, place ONE seed hole coincident at a start angle, then circular-pattern it (equal spacing, 360; pitch = 360/N). Carry the PCD as a toleranced dimension. See sw_get_design_guidance(\"bolt circle\").",
+      "example_bad": "",
+      "example_good": "' seed hole on construction PCD \u00d880; circular pattern 3x equal",
+      "created": "2026-06-21",
+      "hits": 0
+    },
+    {
+      "id": "r0028",
+      "title": "Exploit symmetry: model half then mirror (entities/feature/component)",
+      "applies_to": [
+        "design",
+        "mirror",
+        "symmetry"
+      ],
+      "error_signature": "mirror|symmetry|symmetric|half model",
+      "symptom": "Symmetric features modeled twice drift out of symmetry or double the work.",
+      "cause": "Duplicating symmetric geometry by hand is wasteful and error-prone.",
+      "fix": "Model one side and use Mirror Entities (sketch), Mirror feature (solid), or Mirror Component (assembly). Guarantees symmetry and halves the work. See sw_get_design_guidance for the bottle/piston/manifold examples.",
+      "example_bad": "",
+      "example_good": "' InsertMirrorFeature about the Right plane",
+      "created": "2026-06-21",
+      "hits": 0
+    },
+    {
+      "id": "r0029",
+      "title": "Finish like a real part: base-first order, then break every edge",
+      "applies_to": [
+        "design",
+        "fillet",
+        "chamfer",
+        "manufacturability"
+      ],
+      "error_signature": "sharp edge|no fillet|manufacturab|raw block|simple shape",
+      "symptom": "The model is a raw prism/cylinder with sharp edges - not a professional component.",
+      "cause": "Defaulting to the simplest shape that rebuilds clean, with no design intent or edge treatment.",
+      "fix": "Build base mass first, then bosses, then cuts/holes, then fillets+chamfers LAST. Break every edge (fillets at stress corners, chamfers on outer edges; unspecified radii often R2). Call sw_get_design_guidance(<part>) first to pick the right archetype.",
+      "example_bad": "",
+      "example_good": "' fillets at corners + 45x1 chamfer on outer edges, applied last",
+      "created": "2026-06-21",
+      "hits": 0
+    },
+    {
+      "id": "r0030",
+      "title": "Flat link/bar with two pin holes: one nested sketch (rectangle + 2 circles) \u2192 single boss extrude",
+      "applies_to": [
+        "design",
+        "vba",
+        "extrude"
+      ],
+      "error_signature": "",
+      "symptom": "Need a flat linkage bar (crank/coupler/rocker/ground) with two through-holes at a given pin-to-pin spacing L, color-coded, saved as its own part.",
+      "cause": "Separate boss-then-cut works but is two features; a single nested-contour boss is simpler and verified to produce the holes.",
+      "fix": "On the Front plane, ONE sketch: CreateCornerRectangle spanning (-W/2,-W/2)..(L+W/2,+W/2) [capture as Variant, NOT Set - see r0002], plus two CreateCircle at (0,0) and (L,0). Exit sketch, re-select it (SelectLatestSketch), FeatureExtrusion3 thickness T. The nested inner circles become holes -> verify with Surface.IsCylinder count == 2. Colour via swModel.MaterialPropertyValues (9-double array; 0..2 = R,G,B in 0..1). Save via swModelExt.SaveAs(path, 0, swSaveAsOptions_Silent, Nothing, errs, warns). Holes end up at local (0,0) and (L,0) - reuse those centres later for assembly mates.",
+      "example_bad": "",
+      "example_good": "vRect = swSketchMgr.CreateCornerRectangle(-W/2#,-W/2#,0#, L+W/2#,W/2#,0#) ' Variant\nswSketchMgr.CreateCircle 0#,0#,0#, HR,0#,0# : swSketchMgr.CreateCircle L,0#,0#, L+HR,0#,0#",
+      "created": "2026-06-23",
+      "hits": 0
+    },
+    {
+      "id": "r0031",
+      "title": "Select a component's hole/planar face by LOCAL geometry \u2014 Component2.GetBody returns part-local coords",
+      "applies_to": [
+        "assembly",
+        "vba",
+        "mates"
+      ],
+      "error_signature": "",
+      "symptom": "Need to select a specific hole's cylindrical face (or top/bottom planar face) of an inserted component for a mate or a motor axis, but face names are unstable and several holes share the same radius.",
+      "cause": "Picking faces by assembly-space coordinate is fragile because the mate solver moves parts after each mate.",
+      "fix": "comp.GetBody returns the body with geometry in the PART's LOCAL coordinate system (independent of where the solver placed the component). Iterate GetFirstFace/GetNextFace: for a hole use Surface.CylinderParams (index 0..2 = axis origin xyz, 3..5 = axis dir, 6 = radius) and match on radius AND local centre cp(0),cp(1); for a face use Face2.Normal Z-sign (+Z = top, -Z = bottom). Select for AddMate5 with a SelectData whose Mark=1 (Face2.Select4 with append=True on the 2nd entity).",
+      "example_bad": "",
+      "example_good": "If Abs(cp(6)-HR)<2E-5 And Abs(cp(0)-localCx)<3E-4 And Abs(cp(1))<3E-4 Then Set faceOut = fc",
+      "created": "2026-06-23",
+      "hits": 0
+    },
+    {
+      "id": "r0032",
+      "title": "Match inserted components by InStr on Name2 (instance-suffixed); AssemblyDoc has no GetMateCount",
+      "applies_to": [
+        "assembly",
+        "vba"
+      ],
+      "error_signature": "",
+      "symptom": "Looking up a component by the plain name you set via Component2.Name2 fails (returns Nothing); or swAsm.GetMateCount() / swAsm.GetMates aborts an inline .swb with no log (ran=False).",
+      "cause": "Component2.Name2 reports the instance form e.g. \"Crank_216-1\" (the rename to \"Crank\" does not round-trip to a plain-equality match), and IAssemblyDoc exposes no GetMateCount method, so calling it raises a runtime error that silently kills the macro.",
+      "fix": "Match with InStr(1, comp.Name2, \"Crank\", vbTextCompare) > 0 over swAsm.GetComponents(True). Do not call GetMateCount; judge mate creation by AddMate5 returning non-Nothing plus a post-rebuild GetErrorCode2 scan.",
+      "example_bad": "",
+      "example_good": "If InStr(1, c.Name2, \"Rocker\", vbTextCompare) > 0 Then Set rockerC = c",
+      "created": "2026-06-23",
+      "hits": 0
+    },
+    {
+      "id": "r0033",
+      "title": "AddMate5 ByRef ErrorStatus = 1 means SUCCESS (swAddMateError_NoError)",
+      "applies_to": [
+        "assembly",
+        "vba",
+        "mates"
+      ],
+      "error_signature": "",
+      "symptom": "AddMate5 returns ByRef err=1 for every mate and you conclude the mates failed.",
+      "cause": "swAddMateError_e: 1 = NoError (success). The error values are 0 = unknown error, 2 = bad mate type, 3 = bad alignment, 4 = IncorrectSelections, 5 = OverDefinedAssembly, 6 = bad gear ratios.",
+      "fix": "Treat err=1 together with a non-Nothing return as SUCCESS. Only 0/4/5 indicate real failure. (Clarifies r0013.)",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-23",
+      "hits": 0
+    },
+    {
+      "id": "r0034",
+      "title": "Motion Analysis study with result plots \u2014 verified end-to-end API workflow",
+      "applies_to": [
+        "motion",
+        "vba",
+        "assembly",
+        "plots"
+      ],
+      "error_signature": "",
+      "symptom": "Need a SOLIDWORKS Motion (Motion Analysis) study on an assembly with a driving motor and angular/linear result plots, created entirely from VBA.",
+      "cause": "The motion-study API spans add-in loading, study type, motor definition, calculate, results and plot-feature-data objects across two type libraries.",
+      "fix": "1) Load the solver add-in: swApp.LoadAddIn(\\\"C:\\\\Program Files\\\\SOLIDWORKS Corp\\\\SOLIDWORKS\\\\cmotionsw.dll\\\") (returns 2 when loaded). 2) Set mgr = swModelDocExt.GetMotionStudyManager(); Set study = mgr.GetMotionStudy(\\\"Motion Study 1\\\"); study.Activate. 3) study.StudyType = 4 (swMotionStudyTypeCosmosMotion = Motion Analysis; requires Premium). 4) Motor: Set motor = study.CreateDefinition(swFmAEMRotationalMotor); motor.DirectionReference = <cyl/planar/conical face, circular edge, axis or plane>; motor.ConstantSpeedMotor <rpm>; Set f = study.CreateFeature(motor). 5) study.SetDuration secs; study.Calculate. 6) Set res = study.GetResults(4); build pfd=res.CreatePlotFeatureData(), xfd=res.CreatePlotXAxisFeatureData(), yfd=res.CreatePlotYAxisFeatureData(); yfd.Type=swMotionPlotAxisType (ANGULAR_DISP=9, ANGULAR_VELOCITY=10, ANGULAR_ACCEL=11, TRANS_DISP=6, TRANS_VELOCITY=7, time X-axis=0); yfd.Component (X=1,Y=2,Z=3); yfd.Entities=Array(face); res.InsertPlotFeature pfd,xfd,yfd. For raw numbers: po=res.GetValues(pfd,xfd,(yArray)); po.GetXAxis(); po.GetYAxis(yfd). BINDING: late-bind MotionStudyManager / MotionStudy / CosmosMotionStudyResults / MotionPlotFeatureOutput As Object (SwMotionStudy lib is NOT auto-referenced in an inline .swb); SimulationMotorFeatureData / MotionPlotFeatureData / MotionPlotAxisFeatureData are in the sldworks lib so early-binding is fine.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-23",
+      "hits": 0
+    },
+    {
+      "id": "r0035",
+      "title": "Motor produces zero motion unless you call ConstantSpeedMotor (RPM) \u2014 not MotionType/Velocity",
+      "applies_to": [
+        "motion",
+        "vba"
+      ],
+      "error_signature": "",
+      "symptom": "Motor feature is created and study.Calculate returns True, but the mechanism does not move \u2014 the driven part's angular displacement is constant across the whole run (swing = 0).",
+      "cause": "Setting SimulationMotorFeatureData.MotionType + .Velocity properties alone does NOT define the drive magnitude, so the motor runs at zero speed and the assembly stays in its assembled pose.",
+      "fix": "Call the drive METHOD on the motor feature data: motor.ConstantSpeedMotor(rpm) for constant speed (Speed argument is in RPM), or OscillatingMotor / DistanceMotor / InterpolatedMotor for those types. Set motor.DirectionReference to the rotation-axis entity before study.CreateFeature. Verify by extracting GetYAxis(angular-disp) min/max and confirming a non-zero swing.",
+      "example_bad": "motor.MotionType = 0 : motor.Velocity = 3.14159   ' no drive set -> zero motion",
+      "example_good": "motor.DirectionReference = crankAxisFace : motor.ConstantSpeedMotor 30#   ' 30 RPM = 1 rev / 2 s",
+      "created": "2026-06-23",
+      "hits": 0
+    },
+    {
+      "id": "r0036",
+      "title": "Never delete the default Motion Study 1 \u2014 CreateMotionStudy returns Nothing when zero studies exist",
+      "applies_to": [
+        "motion",
+        "vba"
+      ],
+      "error_signature": "",
+      "symptom": "After DeleteMotionStudy on every study, mgr.CreateMotionStudy() returns Nothing; GetMotionStudyCount=0 and GetMotionStudyNames is empty, leaving the assembly with no usable motion study.",
+      "cause": "The default \\\"Motion Study 1\\\" is created by the MotionManager UI, and the API cannot bootstrap a study from a count of zero \u2014 CreateMotionStudy only adds reliably when at least one study already exists.",
+      "fix": "Keep the default study and reuse mgr.GetMotionStudy(\\\"Motion Study 1\\\"). To reset, replace/edit its motor and plot features rather than deleting the study. If a study was already deleted to zero, recover it by opening the assembly once in the SOLIDWORKS UI (which recreates Motion Study 1).",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-06-23",
+      "hits": 0
+    },
+    {
+      "id": "r0037",
+      "title": "FeatureCut4 on a sketch plane: use Dir to reverse direction, not Flip",
+      "applies_to": [
+        "vba",
+        "cut",
+        "FeatureCut4",
+        "sketch-plane",
+        "direction"
+      ],
+      "error_signature": "FeatureCut4|cut.*(no|not).*(feature|volume)|volume unchanged",
+      "symptom": "sw_run_and_verify returns success=true with no errors, but no cut feature is created and volume is unchanged (FeatureCut4 returns Nothing). Feature tree shows the sketch but no cut feature.",
+      "cause": "FeatureCut4 parameter 2 'Flip' means flip the side to cut (cut outside the sketch contour), not direction. Cutting from a sketch plane whose normal points away from the body goes into empty space by default, so nothing is removed. Reversing direction is the 'Dir' parameter (3rd).",
+      "fix": "Keep Flip=False and set Dir=True so the cut goes opposite the sketch-plane normal into the material. Always confirm with sw_get_mass_properties volume or sw_get_feature_tree; success=true is not evidence the cut happened.",
+      "example_bad": "FeatureManager.FeatureCut4 True, False, False, 1, 0, 0.01, 0, False, False, False, False, 0, 0, False, False, False, False, False, True, True, False, False, False, 0, 0, False, False   ' cuts away from body: no feature",
+      "example_good": "FeatureManager.FeatureCut4 True, False, True, 1, 0, 0.01, 0, False, False, False, False, 0, 0, False, False, False, False, False, True, True, False, False, False, 0, 0, False, False   ' Dir=True, through all into body",
+      "created": "2026-10-15",
+      "hits": 0
+    },
+    {
+      "id": "r0038",
+      "title": "Large model: sketch inference snaps circles - wrap sketch creation in AddToDB True/False",
+      "applies_to": [
+        "vba",
+        "sketch",
+        "cut"
+      ],
+      "error_signature": "removed volume far larger than expected|bodies split|no hole cylinder faces|inference|snap",
+      "symptom": "A through-all cut with a few circles on a standard plane removes tens of thousands of mm3 and splits the part into several bodies, although the same macro is exact on a small part.",
+      "cause": "On a large (zoomed-out) model the sketch inference tolerance is big, so CreateCircleByRadius snaps the circle to nearby model edges. The small-part test never showed it.",
+      "fix": "Set swSketchMgr.AddToDB = True before creating the entities and False after (the MCP templates do this for rectangles). Always compare the removed volume with n x area x thickness before trusting a cut, and test on the real-size part, not a scaled-down one.",
+      "example_bad": "",
+      "example_good": "swSketchMgr.AddToDB = True: swSketchMgr.CreateCircleByRadius x, y, 0, r: swSketchMgr.AddToDB = False",
+      "created": "2026-10-17",
+      "hits": 0
+    },
+    {
+      "id": "r0039",
+      "title": "Sheet-metal edge flange via API: CreateDefinition(swFmEdgeFlange) with an InsertSketchForEdgeFlange sketch, one edge per feature",
+      "applies_to": [
+        "vba",
+        "sheetmetal"
+      ],
+      "error_signature": "InsertSheetMetalEdgeFlange2|CreateFeature Nothing|edge flange|edgeflange",
+      "symptom": "InsertSheetMetalEdgeFlange2 and CreateFeature return Nothing; several edges at once also fail; the flange of one edge grows to the wrong side.",
+      "cause": "InsertSheetMetalEdgeFlange2 is obsolete. Several edges in one feature collide at the corners. SelectByID2 on EDGE picks along the view ray, so it can return the edge on the other side of the thickness, which flips the flange direction.",
+      "fix": "Find each edge by geometry (walk Face2.GetEdges, match both vertices, e.g. Z = top face of the plate), call swModel.InsertSketchForEdgeFlange(edge, pi/2, False) and keep its returned feature, then efd = swFeatMgr.CreateDefinition(swFmEdgeFlange); efd.AddEdges edgeArr, skArr; set BendAngle, UseDefaultBendRadius=False, BendRadius, PositionType=1, OffsetType=0, OffsetDistance; CreateFeature. One feature per edge. Verify with volume: added area per mm = pi/4(Ro^2-Ri^2) + straight*t - overlap with the plate. Face picking by SelectByID2 has the same ray problem, so find faces by normal and box.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-10-17",
+      "hits": 0
+    },
+    {
+      "id": "r0040",
+      "title": "Sheet-metal K-factor: template default is 0.3; set it by passing a CustomBendAllowance object, never via AccessSelections",
+      "applies_to": [
+        "vba",
+        "sheetmetal"
+      ],
+      "error_signature": "KFactor|k-factor|bend allowance|flat pattern size|AccessSelections",
+      "symptom": "The flat pattern is about 0.5 mm shorter than the K=0.44 hand calculation; SheetMetalFeatureData.KFactor reads 0.3 even after ModifyDefinition returned True; calling AccessSelections + ModifyDefinition on the base flange empties the part (bounding box 0).",
+      "cause": "The default part template uses K=0.3 and the base flange keeps its own custom allowance. Setting the sheet-metal feature afterwards does not propagate, and AccessSelections on the base flange breaks the sketch link.",
+      "fix": "Create a scratch sheet-metal part, take cb = BaseFlangeFeatureData.GetCustomBendAllowance, set cb.Type = 2 and cb.KFactor, then pass cb as the PCBA argument of InsertSheetMetalBaseFlange2 in the real part (read back shows the SheetMetal feature at the same K). For edge flanges set efd.GetCustomBendAllowance (Type = 2, KFactor) and efd.SetCustomBendAllowance before CreateFeature. Verify the flat pattern with ExportToDWG2 (the part must be saved first): blank = outer size - 2(R+t) + 2 BA + 2 straight, BA = pi/2 (R + K t).",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-10-17",
+      "hits": 0
+    },
+    {
+      "id": "r0041",
+      "title": "After a macro that creates configurations dies silently, the macro engine stays broken until SolidWorks restarts",
+      "applies_to": [
+        "vba",
+        "automation",
+        "configuration"
+      ],
+      "error_signature": "swRunMacroError_None|ran=false for every macro|AddConfiguration3",
+      "symptom": "sw_run_and_verify and sw_run_vba return ran=false with swRunMacroError_None for every macro, even known-good ones and a trivial ping, after a previous macro ended without writing its last log lines (it used AddConfiguration3 + SetMaterialPropertyValues).",
+      "cause": "The previous macro run crashed inside the VBA host (silent, no runtime log), which leaves the macro runner unusable in that SolidWorks process. Closing documents does not help.",
+      "fix": "Restart SolidWorks (Stop-Process, start SLDWORKS.exe, sw_select_session with the new PID). Test a trivial sw_run_vba ping first. Before using AddConfiguration3 in a macro, test it in a separate small macro on a throw-away part and log every step.",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-10-17",
+      "hits": 5
+    },
+    {
+      "id": "r0042",
+      "title": "Chinese-UI SolidWorks: SetMaterialPropertyName2 only matches localized names - use the lang\\chinese material DB and read the name from it",
+      "applies_to": [
+        "vba",
+        "material"
+      ],
+      "error_signature": "SetMaterialPropertyName2|GetMaterialPropertyName2 empty|material not found|density 1000",
+      "symptom": "SetMaterialPropertyName2 with the English database and an English name leaves the material unchanged (density stays 1000) for names like Plain Carbon Steel, 6061 Alloy, Acrylic (Medium-high impact); only a few names (AISI 304, 6061-T6 (SS), ABS PC) work.",
+      "cause": "With the Traditional Chinese UI the material names are localized. English names that have a localized counterpart do not match; names without translation do.",
+      "fix": "Parse C:\\Program Files\\SOLIDWORKS Corp\\SOLIDWORKS\\lang\\chinese\\sldmaterials\\solidworks materials.sldmat (UTF-16) with <material name=\"...\"> in the same order as the english file, take the Chinese name at the same index and pass it through ChrW(&H....) in the macro together with the chinese database path. Always read back GetMaterialPropertyName2(cfg, db) and the density, and note that config name must be the real one (not Default).",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-10-17",
+      "hits": 0
+    },
+    {
+      "id": "r0043",
+      "title": "Sketch rectangles near the origin silently fail: set SketchManager.AutoInference = False while creating entities; macros without On Error pop a VBA dialog that freezes every COM call",
+      "applies_to": [
+        "vba",
+        "sketch",
+        "automation"
+      ],
+      "error_signature": "rect not created|new sketch not found|sw_status hangs|Microsoft Visual Basic dialog|sw_run_vba running after 120s",
+      "symptom": "CreateCornerRectangle returns no array (and the sketch ends up empty, so a later SelectNewSketch finds nothing) for thin rectangles that straddle or touch the origin axes (e.g. a 4 mm rib at v = 0). Separately, a sw_run_vba without an error handler that hits a runtime error opens a modal Microsoft Visual Basic dialog; after that every MCP call hangs.",
+      "cause": "Sketch inference snaps/rejects the tiny rectangle against the origin. The VBA error dialog is owned by SLDWORKS.exe and is invisible to the MCP watchdog.",
+      "fix": "Set swSketchMgr.AutoInference = False together with AddToDB = True before creating entities, restore True afterwards. Always start macros with On Error GoTo handler. If calls hang, enumerate the windows of the SLDWORKS process (EnumWindows) for a #32770 Microsoft Visual Basic dialog and click the End button (BM_CLICK 0xF5 on the button whose text starts with the localized End).",
+      "example_bad": "",
+      "example_good": "",
+      "created": "2026-10-17",
+      "hits": 0
+    }
+  ]
+}
